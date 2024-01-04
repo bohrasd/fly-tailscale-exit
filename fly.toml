@@ -1,0 +1,24 @@
+app = "fly-tail-exit"
+primary_region = "nrt"
+kill_signal = "SIGINT"
+kill_timeout = "5s"
+
+[env]
+  TS_OUTBOUND_HTTP_PROXY_LISTEN = "0.0.0.0:4411"
+  TS_SOCKS5_SERVER = "0.0.0.0:1080"
+  TS_ACCEPT_DNS = "true"
+  TS_AUTH_ONCE = "true"
+  TS_EXTRA_ARGS = " --advertise-exit-node --ssh"
+  TS_HOSTNAME = "fly-exit"
+
+[[services]]
+  protocol = "udp"
+  internal_port = 41641
+  processes = ["app"]
+
+  [[services.ports]]
+    port = 41641
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 100
+    soft_limit = 75
