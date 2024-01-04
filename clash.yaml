@@ -1,0 +1,66 @@
+port: 8888
+socks-port: 1080
+mixed-port: 8080
+allow-lan: true
+mode: Rule
+log-level: info
+external-controller: '127.0.0.1:6170'
+secret: ""
+experimental:
+    ignore-resolve-fail: true
+cfw-latency-url: 'http://cp.cloudflare.com/generate_204'
+cfw-latency-timeout: 3000
+cfw-latency-type: 1
+cfw-conn-break-strategy: true
+url-rewrite:
+    - '^https?:\/\/(www.)?(g|google)\.cn https://www.google.com 302'
+    - '^https?:\/\/(ditu|maps).google\.cn https://maps.google.com 302'
+proxies:
+    - { server: fly-exit, port: 1080, name: tailscale-exit, type: socks5 }
+proxy-groups:
+    - { name: Proxy, type: select, proxies: ['Auto - UrlTest', tailscale-exit, DIRECT]}
+    - { name: Domestic, type: select, proxies: [DIRECT, Proxy]}
+    - { name: Others, type: select, proxies: [Proxy, DIRECT]}
+    - { name: AdBlock, type: select, proxies: [REJECT, DIRECT, Proxy] }
+    - { name: 'Anti IP', type: select, proxies: [DIRECT, Proxy]}
+    - { name: 'Asian TV', type: select, proxies: [DIRECT, Proxy] }
+    - { name: Apple, type: select, proxies: [Proxy, DIRECT] }
+    - { name: 'Apple Music', type: select, proxies: [Proxy, DIRECT] }
+    - { name: Discord, type: select, proxies: [Proxy, DIRECT] }
+    - { name: OpenAI, type: select, proxies: [Proxy, DIRECT] }
+    - { name: Steam, type: select, proxies: [Proxy, DIRECT] }
+    - { name: 'Auto - UrlTest', type: url-test, proxies: [tailscale-exit], url: 'http://cp.cloudflare.com/generate_204', interval: '3600' }
+rules:
+    - 'RULE-SET, Reject, AdBlock'
+    - 'RULE-SET, Special, DIRECT'
+    - 'RULE-SET, Anti IP, Anti IP'
+    - 'RULE-SET, Bilibili, Asian TV'
+    - 'RULE-SET, Netease Music, Asian TV'
+    - 'RULE-SET, Apple Music, Apple Music'
+    - 'RULE-SET, Apple, Apple'
+    - 'RULE-SET, Discord, Discord'
+    - 'RULE-SET, OpenAI, OpenAI'
+    - 'RULE-SET, Steam, Steam'
+    - 'RULE-SET, PROXY, Proxy'
+    - 'RULE-SET, Domestic, Domestic'
+    - 'RULE-SET, Domestic IPs, Domestic'
+    - 'RULE-SET, LAN, DIRECT'
+    - 'GEOIP, CN, Domestic'
+    - 'MATCH, Others'
+script:
+    code: "def main(ctx, metadata):\n    ruleset_action = {\n        'Reject': 'AdBlock',\n        'Special': 'DIRECT',\n        'Anti IP': 'Anti IP',\n       'Bilibili': 'Asian TV',\n 'Netease Music': 'Asian TV',\n       'Apple Music': 'Apple Music',\n        'Apple': 'Apple',\n 'Discord': 'Discord',\n       'OpenAI': 'OpenAI',\n        'Steam': 'Steam',\n 'PROXY': 'Proxy',\n        'Domestic': 'Domestic',\n        'Domestic IPs': 'Domestic',\n        'LAN': 'DIRECT'\n      }\n\n    port = int(metadata['dst_port'])\n\n    if metadata['network'] == 'UDP' and port == 443:\n        ctx.log('[Script] matched QUIC traffic use reject')\n        return 'REJECT'\n\n    port_list = [21, 22, 23, 53, 80, 123, 143, 194, 443, 465, 587, 853, 993, 995, 998, 2052, 2053, 2082, 2083, 2086, 2095, 2096, 3389, 5222, 5228, 5229, 5230, 8080, 8443, 8880, 8888, 8889]\n    if port not in port_list:\n        ctx.log('[Script] not common port use direct')\n        return 'DIRECT'\n\n    if metadata['dst_ip'] == '':\n        metadata['dst_ip'] = ctx.resolve_ip(metadata['host'])\n\n    for ruleset in ruleset_action:\n        if ctx.rule_providers[ruleset].match(metadata):\n            return ruleset_action[ruleset]\n\n    if metadata['dst_ip'] != '':\n        code = ctx.geoip(metadata['dst_ip'])\n        if code == 'CN':\n            ctx.log('[Script] Geoip CN')\n            return 'Domestic'\n\n    ctx.log('[Script] FINAL')\n    return 'Others'\n"
+rule-providers:
+    Reject: { type: http, behavior: classical, url: 'https://1a135efb-1e6c-4e3c-9d3d-a331bf6a6ee3.oss-cn-hangzhou.aliyuncs.com/Provider/Reject.yaml', path: ./Rules/Reject, interval: 86400 }
+    Special: { type: http, behavior: classical, url: 'https://1a135efb-1e6c-4e3c-9d3d-a331bf6a6ee3.oss-cn-hangzhou.aliyuncs.com/Provider/Special.yaml', path: ./Rules/Special, interval: 86400 }
+    PROXY: { type: http, behavior: classical, url: 'https://1a135efb-1e6c-4e3c-9d3d-a331bf6a6ee3.oss-cn-hangzhou.aliyuncs.com/Provider/Proxy.yaml', path: ./Rules/Proxy, interval: 86400 }
+    Domestic: { type: http, behavior: classical, url: 'https://1a135efb-1e6c-4e3c-9d3d-a331bf6a6ee3.oss-cn-hangzhou.aliyuncs.com/Provider/Domestic.yaml', path: ./Rules/Domestic, interval: 86400 }
+    'Domestic IPs': { type: http, behavior: ipcidr, url: 'https://1a135efb-1e6c-4e3c-9d3d-a331bf6a6ee3.oss-cn-hangzhou.aliyuncs.com/Provider/Domestic%20IPs.yaml', path: ./Rules/Domestic_IPs, interval: 86400 }
+    LAN: { type: http, behavior: classical, url: 'https://1a135efb-1e6c-4e3c-9d3d-a331bf6a6ee3.oss-cn-hangzhou.aliyuncs.com/Provider/LAN.yaml', path: ./Rules/LAN, interval: 86400 }
+    'Anti IP': { type: http, behavior: classical, url: 'https://1a135efb-1e6c-4e3c-9d3d-a331bf6a6ee3.oss-cn-hangzhou.aliyuncs.com/Provider/Anti.yaml', path: ./Rules/Anti_IP, interval: 86400 }
+    Bilibili: { type: http, behavior: classical, url: 'https://1a135efb-1e6c-4e3c-9d3d-a331bf6a6ee3.oss-cn-hangzhou.aliyuncs.com/Provider/Media/Bilibili.yaml', path: ./Rules/Media/Bilibili, interval: 86400 }
+    'Netease Music': { type: http, behavior: classical, url: 'https://1a135efb-1e6c-4e3c-9d3d-a331bf6a6ee3.oss-cn-hangzhou.aliyuncs.com/Provider/Media/Netease%20Music.yaml', path: ./Rules/Media/Netease_Music, interval: 86400 }
+    'Apple Music': { type: http, behavior: classical, url: 'https://1a135efb-1e6c-4e3c-9d3d-a331bf6a6ee3.oss-cn-hangzhou.aliyuncs.com/Provider/Media/Apple%20Music.yaml', path: ./Rules/Media/Apple_Music, interval: 86400 }
+    Apple: { type: http, behavior: classical, url: 'https://1a135efb-1e6c-4e3c-9d3d-a331bf6a6ee3.oss-cn-hangzhou.aliyuncs.com/Provider/Apple.yaml', path: ./Rules/Apple, interval: 86400 }
+    Discord: { type: http, behavior: classical, url: 'https://1a135efb-1e6c-4e3c-9d3d-a331bf6a6ee3.oss-cn-hangzhou.aliyuncs.com/Provider/Discord.yaml', path: ./Rules/Discord, interval: 86400 }
+    Steam: { type: http, behavior: classical, url: 'https://1a135efb-1e6c-4e3c-9d3d-a331bf6a6ee3.oss-cn-hangzhou.aliyuncs.com/Provider/Steam.yaml', path: ./Rules/Steam, interval: 86400 }
+    OpenAI: { type: http, behavior: classical, url: 'https://1a135efb-1e6c-4e3c-9d3d-a331bf6a6ee3.oss-cn-hangzhou.aliyuncs.com/Provider/OpenAI.yaml', path: ./Rules/OpenAI, interval: 86400 }
